@@ -19,22 +19,17 @@ def login(request):
         data = json.loads(request.body)
         email = data.get("email")
         password = data.get("password")
-        user_obj = CustomUser.objects.filter(email = email).values("is_doctor", "is_patient")
+        user_obj = CustomUser.objects.filter(email = email).values("is_doctor", "is_patient", "is_superuser")
         if user_obj is None:
             res = {"message" : "User is not registered"}
             return JsonResponse(res, status = 401)
         is_doctor = user_obj[0].get("is_doctor")
         is_patient = user_obj[0].get("is_patient")
-        if is_patient:
-            status = "Patient"
-        elif is_doctor:
-            status = "Doctor"
-        else:
-            status = "Receptionist"
+        is_receptionist = user_obj[0].get("is_superuser")
         user = authenticate(email = email, password = password)
         if user:
             l_in(request, user)
-            res = {"message" : "Login is successfull", "status" : status}
+            res = {"message" : "Login is successfull", "data" : {"is_patient" : is_patient, "is_doctor" : is_doctor, "is_receptionist" : is_receptionist}}
             return JsonResponse(res, status = 200)
         else:
             res = {"message" : "Incorrect password"}

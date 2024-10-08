@@ -17,8 +17,11 @@ class PatientInfo(models.Model):
     class Meta:
         db_table = "patient_info"
 
-# class Appointment(models.Models):
-#     patient = models.ForeignKey(CustomUser, on_delete = models.SET_NULL, null = True)
-#     issue = models.TextField()
-#     doctor = models.ForeignKey(CustomUser, on_delete = models.SET_NULL, null = True)
+class Appointment(models.Model):
+    patient = models.ForeignKey(CustomUser, on_delete = models.SET_NULL, null = True)
+    doctor_type = models.CharField(max_length = 25)
+    description = models.TextField()
+    preferred_doctor = models.ForeignKey(CustomUser, on_delete = models.SET_NULL, limit_choices_to = {"is_doctor" : True}, related_name = "doctor", null = True)
+    request_date_time = models.DateTimeField(auto_now_add = True)
+
     
