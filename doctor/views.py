@@ -20,18 +20,19 @@ def index(request):
     
 def registration(request):
     if request.method == "POST":
-        data = json.loads(request.body)
+        # data = json.loads(request.body)
+        data = request.POST
         email = data.get("email")
         first_name = data.get("first_name")
         last_name = data.get("last_name")
-        phone_number = data.get("phone_number")
-        password = data.get(request.body)
-        confirm_password = data.get(request.body)
+        phone_number = data.get("phone_no")
+        password = data.get("password_1")
+        confirm_password = data.get("password_2")
         gender = data.get("gender")
         speciality = data.get("speciality")
         address = data.get("address")
         
-        if not (email and first_name and last_name and phone_number and password and confirm_password and gender and speciality and address):
+        if not (email and first_name and phone_number and password and confirm_password and gender and speciality and address):
             res = {'message' : "Some field is missing"}
             return JsonResponse(res, status = 400)
         if last_name is None:
