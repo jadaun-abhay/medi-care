@@ -11,6 +11,7 @@ from django.contrib.auth import authenticate
 from django.contrib.auth import login as l_in
 from django.contrib.auth import logout as l_out
 import datetime
+from django.conf import settings
 
 def index(request):
     if request.method == "GET":
@@ -36,9 +37,16 @@ def registration(request):
         blood_group = data.get("blood_group")
         gender = data.get("gender")
         medical_history = data.getlist("medical_history")
-        print(password)
-        print(re.match(r"^(?=.*?[A-Z])(?=.*?[a-z])(?=.*?[0-9])(?=.*?[#?!@$%^&*-]).{8,}$", password))
-
+        image = request.FILES.get("profile_image")
+        extension = image.name.split(".")[-1]
+        extension = extension.lower()
+        if extension not in settings.WHITELISTED_IMAGE_TYPES.keys():
+            res = {"message" : "Invalid image extension"}
+            return JsonResponse(res, status = 400)
+        content_type = image.content_type
+        if content_type not in settings.WHITELISTED_IMAGE_TYPES.values():
+            res = {"message" : "Invalid image content type"}
+            return JsonResponse(res, status = 400)
         if not (first_name and email and password and confirm_password and address and dob and phone_number and height and weight and gender and blood_group):
             res = {"message" : "Some field is missing"}
             return JsonResponse(res, status = 400)
@@ -84,7 +92,10 @@ def registration(request):
                 else:
                     res = {"message" : "Medical history is invalid"}
             user_obj = CustomUser.objects.create_patient(password = password, first_name = first_name, last_name = last_name, email = email, phone_number = phone_number)
-            user_obj.patientinfo_set.create(height = height, weight = weight, dob = dob, blood_group = blood_group, gender = gender, address = address, medical_history = history)
+            if image is None:
+                user_obj.patientinfo_set.create(height = height, weight = weight, dob = dob, blood_group = blood_group, gender = gender, address = address, medical_history = medical_history)
+            else:
+                user_obj.patientinfo_set.create(height = height, weight = weight, dob = dob, blood_group = blood_group, gender = gender, address = address, medical_history = history, profile_photo = image)
             res = {"message" : "Patient registration is successful"}
             return JsonResponse(res, status = 201)
         else:

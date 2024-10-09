@@ -7,6 +7,7 @@ import json
 from django.http import JsonResponse
 import re
 from users.models import CustomUser
+from django.conf import settings
 
 
 
@@ -30,7 +31,16 @@ def registration(request):
         gender = data.get("gender")
         speciality = data.get("speciality")
         address = data.get("address")
-        
+        image = request.FILES.get("profile_image")
+        extension = image.name.split(".")[-1]
+        extension = extension.lower()
+        if extension not in settings.WHITELISTED_IMAGE_TYPES.keys():
+            res = {"message" : "Invalid image extension"}
+            return JsonResponse(res, status = 400)
+        content_type = image.content_type
+        if content_type not in settings.WHITELISTED_IMAGE_TYPES.values():
+            res = {"message" : "Invalid image content type"}
+            return JsonResponse(res, status = 400)
         if not (email and first_name and phone_number and password and confirm_password and gender and speciality and address):
             res = {'message' : "Some field is missing"}
             return JsonResponse(res, status = 400)
@@ -64,7 +74,10 @@ def registration(request):
             return JsonResponse(res, status = 409)
         if password == confirm_password:
             user_obj = CustomUser.objects.create_doctor(password = password, first_name = first_name, last_name = last_name, email = email, phone_number = phone_number)
-            user_obj.doctorinfo_set.create(gender = gender, speciality = speciality, address = address)
+            if image is None:
+                user_obj.doctorinfo_set.create(gender = gender, speciality = speciality, address = address)
+            else:
+                                user_obj.doctorinfo_set.create(gender = gender, speciality = speciality, address = address, profile_photo = image)
             res = {"message" : "Doctor registration is successful"}
             return JsonResponse(res, status = 201)
         else:
