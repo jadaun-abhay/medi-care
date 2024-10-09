@@ -22,7 +22,6 @@ def index(request):
 
 def registration(request):
     if request.method == "POST":
-        # data = json.loads(request.body)
         data = request.POST
         first_name = data.get("first_name")
         last_name = data.get("last_name")
@@ -32,11 +31,13 @@ def registration(request):
         confirm_password = data.get("password_2")
         address = data.get("address")
         dob = data.get("dob")
-        height = data.get("height")
-        weight = data.get("weight")
+        height = int(data.get("height"))
+        weight = int(data.get("weight"))
         blood_group = data.get("blood_group")
         gender = data.get("gender")
         medical_history = data.getlist("medical_history")
+        print(password)
+        print(re.match(r"^(?=.*?[A-Z])(?=.*?[a-z])(?=.*?[0-9])(?=.*?[#?!@$%^&*-]).{8,}$", password))
 
         if not (first_name and email and password and confirm_password and address and dob and phone_number and height and weight and gender and blood_group):
             res = {"message" : "Some field is missing"}
@@ -50,20 +51,19 @@ def registration(request):
             if not bool(re.match(r"\b[a-z|A-Z]{2,25}", last_name)):
                 res = {"message" : "Last name is invalid"}
                 return JsonResponse(res, status = 400)
-        elif not (bool(re.match(r"\d{2, 3}", height)) and bool(re.match(r"\d{2, 3}", weight))):
+        elif not (55 <= height <= 251) and (48 <= weight <= 727):
             res = {"message" : "Height or weight is invalid"}
             return JsonResponse(res, status = 400)
         elif len(address) == 0:
             res = {"message" : "Address is invalid"}
             return JsonResponse(res, status = 400)
-        elif not bool(re.match(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b", password)):
+        elif not bool(re.match(r"^(?=.*?[A-Z])(?=.*?[a-z])(?=.*?[0-9])(?=.*?[#?!@$%^&*-]).{8,}$", password)):
             res = {"message" : "Password is invalid"}
             return JsonResponse(res, status = 400)
         elif not bool(re.match(r"(0|91)?[6-9][0-9]{9}", phone_number)):
             res = {"message" : "Phone number is invalid"}
             return JsonResponse(res, status = 400)
-        elif not bool(re.match(r"\bMale|Female", gender)):
-            # print("hi")
+        elif not bool(re.match(r"\bmale|female", gender)):
             res = {"message" : "Gender is invalid"}
             return JsonResponse(res, status = 400)
         elif not bool(re.match(r"(A|B|AB|O)[+-]", blood_group)):
@@ -93,3 +93,24 @@ def registration(request):
     else:
         res = {"message" : "Invalid request method"}
         return JsonResponse(res, status = 405)
+
+def make_appointment(request):
+    if request.method == "POST":
+        if not request.user.is_authenticated:
+            res = {"message" : "Login is required"}
+            return JsonResponse(res, status = 401)
+        if not request.user.is_patient:
+            res = {"message" : "Only patient can initiate an appoitnment"}
+            return JsonResponse(res, status = 403)
+        data = json.loads(request.body)
+        preferred_doctor = data.get("preferred_doctor_id")
+        preferred_doctor_obj = CustomUser.objects.get(id = preferred_doctor)
+        problem_description = data.get("problem_description")
+        symptoms = data.get("symptoms")
+        request.user.appointment_set.create(preferred_doctor = preferred_doctor_obj, problem_description = problem_description, symptoms = symptoms)
+        res = {"message" : "success", "data" : "Appointment has been booked"}
+        return JsonResponse(res, status = 201)
+    else:
+        res = {"message" : "Invalid request method"}
+        return JsonResponse(res, status = 405)
+    

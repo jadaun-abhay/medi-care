@@ -20,7 +20,6 @@ def index(request):
     
 def registration(request):
     if request.method == "POST":
-        # data = json.loads(request.body)
         data = request.POST
         email = data.get("email")
         first_name = data.get("first_name")
@@ -50,10 +49,10 @@ def registration(request):
         elif not bool(re.match(r"(0|91)?[6-9][0-9]{9}", phone_number)):
             res = {"message" : "Phone number is invalid"}
             return JsonResponse(res, status = 400)
-        elif not bool(re.match(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b", password)):
+        elif not bool(re.match(r"^(?=.*?[A-Z])(?=.*?[a-z])(?=.*?[0-9])(?=.*?[#?!@$%^&*-]).{8,}$", password)):
             res = {"message" : "Password is invalid"}
             return JsonResponse(res, status = 400)
-        elif not bool(re.match(r"\bMale|Female", gender)):
+        elif not bool(re.match(r"\bmale|female", gender)):
             res = {"message" : "Gender is invalid"}
             return JsonResponse(res, status = 400)
         elif len(speciality) == 0:
