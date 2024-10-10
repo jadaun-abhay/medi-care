@@ -38,15 +38,16 @@ def registration(request):
         gender = data.get("gender")
         medical_history = data.getlist("medical_history")
         image = request.FILES.get("profile_image")
-        extension = image.name.split(".")[-1]
-        extension = extension.lower()
-        if extension not in settings.WHITELISTED_IMAGE_TYPES.keys():
-            res = {"message" : "Invalid image extension"}
-            return JsonResponse(res, status = 400)
-        content_type = image.content_type
-        if content_type not in settings.WHITELISTED_IMAGE_TYPES.values():
-            res = {"message" : "Invalid image content type"}
-            return JsonResponse(res, status = 400)
+        if not image is None:
+            extension = image.name.split(".")[-1]
+            extension = extension.lower()
+            if extension not in settings.WHITELISTED_IMAGE_TYPES.keys():
+                res = {"message" : "Invalid image extension"}
+                return JsonResponse(res, status = 400)
+            content_type = image.content_type
+            if content_type not in settings.WHITELISTED_IMAGE_TYPES.values():
+                res = {"message" : "Invalid image content type"}
+                return JsonResponse(res, status = 400)
         if not (first_name and email and password and confirm_password and address and dob and phone_number and height and weight and gender and blood_group):
             res = {"message" : "Some field is missing"}
             return JsonResponse(res, status = 400)
@@ -84,18 +85,17 @@ def registration(request):
         if password == confirm_password:
             d = dob.split("-")
             dob = datetime.date(int(d[0]), int(d[1]), int(d[2]))
-            if medical_history == "None":
+            if medical_history == ["None"]:
                 medical_history = None
             else:
-                if medical_history.count("None") != 0:
-                    history = ','.join(medical_history)
-                else:
+                if len(medical_history) > 1 and medical_history.count("None") > 0:
                     res = {"message" : "Medical history is invalid"}
+                    return JsonResponse(res, status = 400)
             user_obj = CustomUser.objects.create_patient(password = password, first_name = first_name, last_name = last_name, email = email, phone_number = phone_number)
             if image is None:
                 user_obj.patientinfo_set.create(height = height, weight = weight, dob = dob, blood_group = blood_group, gender = gender, address = address, medical_history = medical_history)
             else:
-                user_obj.patientinfo_set.create(height = height, weight = weight, dob = dob, blood_group = blood_group, gender = gender, address = address, medical_history = history, profile_photo = image)
+                user_obj.patientinfo_set.create(height = height, weight = weight, dob = dob, blood_group = blood_group, gender = gender, address = address, medical_history = medical_history, profile_photo = image)
             res = {"message" : "Patient registration is successful"}
             return JsonResponse(res, status = 201)
         else:

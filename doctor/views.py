@@ -8,6 +8,7 @@ from django.http import JsonResponse
 import re
 from users.models import CustomUser
 from django.conf import settings
+from doctor.models import Speciality
 
 
 
@@ -29,7 +30,7 @@ def registration(request):
         password = data.get("password_1")
         confirm_password = data.get("password_2")
         gender = data.get("gender")
-        speciality = data.get("speciality")
+        speciality_id = data.get("speciality_id")
         address = data.get("address")
         image = request.FILES.get("profile_image")
         extension = image.name.split(".")[-1]
@@ -41,7 +42,7 @@ def registration(request):
         if content_type not in settings.WHITELISTED_IMAGE_TYPES.values():
             res = {"message" : "Invalid image content type"}
             return JsonResponse(res, status = 400)
-        if not (email and first_name and phone_number and password and confirm_password and gender and speciality and address):
+        if not (email and first_name and phone_number and password and confirm_password and gender and speciality_id and address):
             res = {'message' : "Some field is missing"}
             return JsonResponse(res, status = 400)
         if last_name is None:
@@ -65,8 +66,9 @@ def registration(request):
         elif not bool(re.match(r"\bmale|female", gender)):
             res = {"message" : "Gender is invalid"}
             return JsonResponse(res, status = 400)
-        elif len(speciality) == 0:
-            res = {"message" : "Speciality can not be empty"}
+        speciality_obj = Speciality.objects.filter(id = speciality_id)[0]
+        if speciality_obj is None:
+            res = {"message" : "Speciality is not known"}
             return JsonResponse(res, status = 400)
         user_obj = CustomUser.objects.filter(email = email).values("email")
         if user_obj:
@@ -75,9 +77,9 @@ def registration(request):
         if password == confirm_password:
             user_obj = CustomUser.objects.create_doctor(password = password, first_name = first_name, last_name = last_name, email = email, phone_number = phone_number)
             if image is None:
-                user_obj.doctorinfo_set.create(gender = gender, speciality = speciality, address = address)
+                user_obj.doctorinfo_set.create(gender = gender, speciality = speciality_obj, address = address)
             else:
-                                user_obj.doctorinfo_set.create(gender = gender, speciality = speciality, address = address, profile_photo = image)
+                user_obj.doctorinfo_set.create(gender = gender, speciality = speciality_obj, address = address, profile_photo = image)
             res = {"message" : "Doctor registration is successful"}
             return JsonResponse(res, status = 201)
         else:
