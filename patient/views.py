@@ -4,8 +4,7 @@ from django.shortcuts import render
 
 import json
 from django.http import JsonResponse
-from users.models import CustomUser
-from users.manager import CustomUserManager 
+from users.models import CustomUser, LeftPanel
 import re
 from django.contrib.auth import authenticate
 from django.contrib.auth import login as l_in
@@ -15,7 +14,22 @@ from django.conf import settings
 
 def index(request):
     if request.method == "GET":
-        res = {"message" : "Patient related app first API"}
+        if not request.user.is_authenticated:
+            res = {"message" : "Login is required !!!"}
+            return JsonResponse(res, status = 401)
+        panel_obj = LeftPanel.objects.filter(for_patient = True).values("title", "state", "priority", "icon")
+        res = {"message" : "success", "data" : {"title" : "PATIENT", "children" : []}}
+        for option in panel_obj:
+            optn_dict = {}
+            title = option.get("title")
+            optn_dict["title"] = title
+            state = option.get("state")
+            optn_dict["state"] = state
+            priority = option.get("priority")
+            optn_dict["priority"] = priority
+            icon = option.get("icon")
+            optn_dict["icon"] = icon
+            res["data"]["children"].append(optn_dict)
         return JsonResponse(res, status = 200)
     else:
         res = {"message" : "Invalid request method"}
@@ -96,6 +110,8 @@ def registration(request):
                 user_obj.patientinfo_set.create(height = height, weight = weight, dob = dob, blood_group = blood_group, gender = gender, address = address, medical_history = medical_history)
             else:
                 user_obj.patientinfo_set.create(height = height, weight = weight, dob = dob, blood_group = blood_group, gender = gender, address = address, medical_history = medical_history, profile_photo = image)
+            # user = authenticate(email = email, password = password)
+            # l_in(request, user)
             res = {"message" : "Patient registration is successful"}
             return JsonResponse(res, status = 201)
         else:
@@ -105,22 +121,61 @@ def registration(request):
         res = {"message" : "Invalid request method"}
         return JsonResponse(res, status = 405)
 
-def make_appointment(request):
+def appointment(request):
+    if not request.user.is_authenticated:
+        res = {"message" : "Login is required !!!"}
+        return JsonResponse(res, status = 401)
+    if not request.user.is_patient:
+        res = {"message" : "Only patient can initiate an appointment"}
+        return JsonResponse(res, status = 403)
     if request.method == "POST":
-        if not request.user.is_authenticated:
-            res = {"message" : "Login is required"}
-            return JsonResponse(res, status = 401)
-        if not request.user.is_patient:
-            res = {"message" : "Only patient can initiate an appoitnment"}
-            return JsonResponse(res, status = 403)
         data = json.loads(request.body)
         preferred_doctor = data.get("preferred_doctor_id")
-        preferred_doctor_obj = CustomUser.objects.get(id = preferred_doctor)
+        preferred_doctor_obj = CustomUser.objects.filter(id = preferred_doctor)[0]
+        applied_for = data.get("applied_for")
+        date_time_list = applied_for.split(", ")
+        date = date_time_list[0]
+        time = date_time_list[1]
+        date = date.split("/")
+        time = time.split(":")
+        applied_for = datetime.datetime(int(date[2]), int(date[1]), int(date[0]), int(time[0]), int(time[1]), int(time[2]))
         problem_description = data.get("problem_description")
         symptoms = data.get("symptoms")
-        request.user.appointment_set.create(preferred_doctor = preferred_doctor_obj, problem_description = problem_description, symptoms = symptoms)
+        if not (preferred_doctor and applied_for and problem_description and symptoms):
+            res = {"messsage" : "Some fields are missing"}
+            return JsonResponse(res, status = 400)
+        apntmnt_query_set = request.user.appointment_set.filter(requested_for = applied_for, cure_status = False)
+        if apntmnt_query_set:
+            res = {"message" : f"Your appointment is already booked on {apntmnt_query_set[0].requested_for.strftime("%d/%b/%Y at %H:%M:%S")}", "data" : {"appointment_id" : apntmnt_query_set[0].id}}
+            return JsonResponse(res, status = 400)
+        request.user.appointment_set.create(preferred_doctor = preferred_doctor_obj, problem_description = problem_description, symptoms = symptoms, requested_for = applied_for)
         res = {"message" : "success", "data" : "Appointment has been booked"}
         return JsonResponse(res, status = 201)
+    elif request.method == "GET":
+        appointment_query_set = request.user.appointment_set.filter(payment = None)
+        res = {"message" : "success", "data" : {"pending_appointments" : [], "shceduled_appointments" : []}}
+        print(appointment_query_set[0])
+        for appointment in appointment_query_set:
+            my_dict = {}
+            appointment_id = appointment.id
+            my_dict["appointment_id"] = appointment_id
+            problem_description = appointment.problem_description
+            my_dict["problem_description"] = problem_description
+            requested_at = appointment.requested_at
+            my_dict["requested_at"] = requested_at
+            requested_for = appointment.requested_for
+            my_dict["requested_for"] = requested_for
+            preferred_doctor_id = appointment.preferred_doctor
+            my_dict["preferred_doctor_id"] = preferred_doctor_id.id
+            preferred_doctor_name = appointment.preferred_doctor.first_name
+            if appointment.preferred_doctor.last_name:
+                preferred_doctor_name += " " + appointment.preferred_doctor.last_name
+            my_dict["preferred_doctor_name"] = preferred_doctor_name
+            if appointment.approval_status == False or (appointment.approval_status == True and appointment.cure_status == False):
+                res["data"]["pending_appointments"].append(my_dict)
+            if appointment.cure_status == True:
+                res["data"]["shceduled_appointments"].append(my_dict)
+        return JsonResponse(res, status = 200)
     else:
         res = {"message" : "Invalid request method"}
         return JsonResponse(res, status = 405)

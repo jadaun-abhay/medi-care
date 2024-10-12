@@ -2,19 +2,34 @@ from django.shortcuts import render
 
 # Create your views here.
 
-
-import json
 from django.http import JsonResponse
 import re
-from users.models import CustomUser
+from users.models import CustomUser, LeftPanel
 from django.conf import settings
 from doctor.models import Speciality
+from patient.models import Appointment
+import datetime
 
 
 
 def index(request):
     if request.method == "GET":
-        res = {"message" : "doctor app index A.P.I"}
+        if not request.user.is_authenticated:
+            res = {"message" : "Login is required !!!"}
+            return JsonResponse(res, status = 401)
+        panel_obj = LeftPanel.objects.filter(for_doctor = True).values("title", "state", "priority", "icon")
+        res = {"message" : "success", "data" : {"title" : "DOCTOR", "children" : []}}
+        for option in panel_obj:
+            optn_dict = {}
+            title = option.get("title")
+            optn_dict["title"] = title
+            state = option.get("state")
+            optn_dict["state"] = state
+            priority = option.get("priority")
+            optn_dict["priority"] = priority
+            icon = option.get("icon")
+            optn_dict["icon"] = icon
+            res["data"]["children"].append(optn_dict)
         return JsonResponse(res, status = 200)
     else:
         res = {"message" : "Invalid request method"}
@@ -30,18 +45,19 @@ def registration(request):
         password = data.get("password_1")
         confirm_password = data.get("password_2")
         gender = data.get("gender")
-        speciality_id = data.get("speciality_id")
+        speciality_id = data.get("speciality")
         address = data.get("address")
         image = request.FILES.get("profile_image")
-        extension = image.name.split(".")[-1]
-        extension = extension.lower()
-        if extension not in settings.WHITELISTED_IMAGE_TYPES.keys():
-            res = {"message" : "Invalid image extension"}
-            return JsonResponse(res, status = 400)
-        content_type = image.content_type
-        if content_type not in settings.WHITELISTED_IMAGE_TYPES.values():
-            res = {"message" : "Invalid image content type"}
-            return JsonResponse(res, status = 400)
+        if not image is None:
+            extension = image.name.split(".")[-1]
+            extension = extension.lower()
+            if extension not in settings.WHITELISTED_IMAGE_TYPES.keys():
+                res = {"message" : "Invalid image extension"}
+                return JsonResponse(res, status = 400)
+            content_type = image.content_type
+            if content_type not in settings.WHITELISTED_IMAGE_TYPES.values():
+                res = {"message" : "Invalid image content type"}
+                return JsonResponse(res, status = 400)
         if not (email and first_name and phone_number and password and confirm_password and gender and speciality_id and address):
             res = {'message' : "Some field is missing"}
             return JsonResponse(res, status = 400)
@@ -85,6 +101,63 @@ def registration(request):
         else:
             res = {"message" : "Confirm password is not matching"}
             return JsonResponse(res, status = 400)
+    else:
+        res = {"message" : "Invalid request method"}
+        return JsonResponse(res, status = 405)
+    
+def appointments(request):
+    if not request.user.is_authenticated:
+        res = {"message" : "Login is required !!!"}
+        return JsonResponse(res, status = 401)
+    if not request.user.is_doctor:
+        res = {"message" : "Feature is only available for doctors only"}
+        return JsonResponse(res, status = 403)
+    if request.method == "GET":
+        appointment_obj = Appointment.objects.filter(preferred_doctor = request.user, payment = None)
+        if appointment_obj is None:
+            res = {"message" : "There are no appointments for you"}
+            return JsonResponse(res, status = 202)
+        res = {"message" : "success", "data" : {"shcheduled_appointments" : [], "previous_appointments" : [], "requested_appointments" : []}}
+        apntmnt_dict = {}
+        for appointment in appointment_obj:
+            apntmnt_dict = {}
+            appointment_id = appointment.id
+            apntmnt_dict["appointment_id"] = appointment_id
+            patient_id = appointment.patient.id
+            apntmnt_dict["patient_id"] = patient_id
+            patient_name = appointment.patient.first_name
+            if appointment.patient.last_name:
+                patient_name += " " + appointment.patient.last_name
+            apntmnt_dict["patient_name"] = patient_name
+            date_of_application = appointment.requested_at
+            apntmnt_dict["initiated_at"] = date_of_application
+            requested_for = appointment.requested_for
+            apntmnt_dict["requested_for"] = requested_for
+            problem_description = appointment.problem_description
+            apntmnt_dict["problem_description"] = problem_description
+            symptoms = appointment.symptoms
+            apntmnt_dict["symptoms"] = symptoms
+            if appointment.approval_status == False and appointment.remark == None:
+                res["data"]["requested_appointments"].append(apntmnt_dict)
+            if appointment.cure_status == True and appointment.payment == None:
+                res["data"]["shcheduled_appointments"].append(apntmnt_dict)
+            if appointment.payment:
+                res["data"]["previous_appointments"].append(apntmnt_dict)
+            res["data"].append(apntmnt_dict)
+        return JsonResponse(res, status = 200)
+    elif request.method == "POST":
+        data = request.POST
+        appointment_id = data.get("appointment_id")
+        if not appointment_id:
+            res = {"message" : "Appointment id is required"}
+            return JsonResponse(res, status = 400)
+        appointment_query_set = Appointment.objects.filter(id = appointment_id, approval_status = True, payment = None)
+        if not appointment_query_set:
+            res = {"message" : f"There is no such appointment with id : {appointment_id}"}
+            return JsonResponse(res, status = 400)
+        appointment_query_set.update(cure_status = True, last_modified_by_doctor = datetime.datetime.now())
+        res = {"message" : f"Appointment with id = {appointment_id} is scheduled on {appointment_query_set[0].requested_for}"}
+        return JsonResponse(res, status = 200)
     else:
         res = {"message" : "Invalid request method"}
         return JsonResponse(res, status = 405)

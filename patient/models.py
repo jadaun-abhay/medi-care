@@ -2,8 +2,7 @@ from django.db import models
 
 # Create your models here.
 from users.models import CustomUser
-from django.utils import timezone
-
+from doctor.models import PaymentDetails
 
 class PatientInfo(models.Model):
 
@@ -28,13 +27,24 @@ class Appointment(models.Model):
     preferred_doctor = models.ForeignKey(CustomUser, on_delete = models.SET_NULL, limit_choices_to = {"is_doctor" : True}, related_name = "doctor", null = True)
     symptoms = models.TextField()
     problem_description = models.TextField()
-    request_date_time = models.DateTimeField(auto_now_add = True)
+    requested_at = models.DateTimeField(auto_now_add = True)
+    requested_for = models.DateTimeField(null = True)
     approval_status = models.BooleanField(default = False)
     cure_status = models.BooleanField(default = False)
     remark = models.TextField(null = True)
-    last_modified = models.DateTimeField(auto_now = True)
+    last_modified_by_receptionist = models.DateTimeField(null = True)
+    last_modiefied_by_doctor = models.DateTimeField(null = True)
+    payment = models.ForeignKey(PaymentDetails, on_delete = models.SET_NULL, null = True)
 
     class Meta:
         db_table = "patient_appointment"
 
+class Prescription(models.Model):
+    appointment = models.ManyToManyField(Appointment)
+    medicine = models.TextField()
+    frequency = models.TextField()
+    number_of_days = models.SmallIntegerField()
+
+    class Meta:
+        db_table = "prescription_details"
     

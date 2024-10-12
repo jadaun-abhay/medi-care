@@ -27,6 +27,15 @@ class DoctorInfo(models.Model):
     gender = models.CharField(max_length = 6)
     address = models.TextField()
     profile_photo = models.ImageField(upload_to = nameFile, default = '/'.join(["doctor", "default_profile", "profile.jpeg"]))
+    fees = models.CharField(max_length = 30)
 
     class Meta:
         db_table = "doctor_info"
+
+class PaymentDetails(models.Model):
+    prescription = models.ForeignKey("patient.Prescription", on_delete = models.SET_NULL, null = True)
+    amount = models.SmallIntegerField()
+    payment_status = models.BooleanField(default = True)
+
+    class Meta:
+        db_table = "payment_details"
