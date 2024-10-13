@@ -2,7 +2,6 @@ from django.db import models
 
 # Create your models here.
 from users.models import CustomUser
-from doctor.models import PaymentDetails
 
 class PatientInfo(models.Model):
 
@@ -33,11 +32,10 @@ class Appointment(models.Model):
     cure_status = models.BooleanField(default = False)
     remark = models.TextField(null = True)
     last_modified_by_receptionist = models.DateTimeField(null = True)
-    last_modiefied_by_doctor = models.DateTimeField(null = True)
-    payment = models.ForeignKey(PaymentDetails, on_delete = models.SET_NULL, null = True)
-
-    class Meta:
-        db_table = "patient_appointment"
+    last_modified_by_doctor = models.DateTimeField(null = True)
+    rejection_status = models.BooleanField(default = False)
+    payment = models.BooleanField(default = False)
+    prescription_status = models.BooleanField(default = False)
 
 class Prescription(models.Model):
     appointment = models.ManyToManyField(Appointment)

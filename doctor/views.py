@@ -2,12 +2,13 @@ from django.shortcuts import render
 
 # Create your views here.
 
+import json
 from django.http import JsonResponse
 import re
 from users.models import CustomUser, LeftPanel
 from django.conf import settings
 from doctor.models import Speciality
-from patient.models import Appointment
+from patient.models import Appointment,Prescription
 import datetime
 
 
@@ -113,11 +114,11 @@ def appointments(request):
         res = {"message" : "Feature is only available for doctors only"}
         return JsonResponse(res, status = 403)
     if request.method == "GET":
-        appointment_obj = Appointment.objects.filter(preferred_doctor = request.user, payment = None)
+        appointment_obj = Appointment.objects.filter(preferred_doctor = request.user, rejection_status = False, prescription_status = False)
         if appointment_obj is None:
             res = {"message" : "There are no appointments for you"}
             return JsonResponse(res, status = 202)
-        res = {"message" : "success", "data" : {"shcheduled_appointments" : [], "previous_appointments" : [], "requested_appointments" : []}}
+        res = {"message" : "success", "data" : {"scheduled_appointments" : [], "previous_appointments" : [], "requested_appointments" : []}}
         apntmnt_dict = {}
         for appointment in appointment_obj:
             apntmnt_dict = {}
@@ -137,28 +138,79 @@ def appointments(request):
             apntmnt_dict["problem_description"] = problem_description
             symptoms = appointment.symptoms
             apntmnt_dict["symptoms"] = symptoms
-            if appointment.approval_status == False and appointment.remark == None:
+            if appointment.approval_status == True and appointment.rejection_status == False and appointment.cure_status == False:
                 res["data"]["requested_appointments"].append(apntmnt_dict)
-            if appointment.cure_status == True and appointment.payment == None:
-                res["data"]["shcheduled_appointments"].append(apntmnt_dict)
-            if appointment.payment:
+            if appointment.cure_status == True and appointment.prescription_status == False:
+                res["data"]["scheduled_appointments"].append(apntmnt_dict)
+            if appointment.payment == True:
                 res["data"]["previous_appointments"].append(apntmnt_dict)
-            res["data"].append(apntmnt_dict)
         return JsonResponse(res, status = 200)
-    elif request.method == "POST":
-        data = request.POST
+    elif request.method == "PATCH":
+        data = json.loads(request.body)
         appointment_id = data.get("appointment_id")
         if not appointment_id:
             res = {"message" : "Appointment id is required"}
             return JsonResponse(res, status = 400)
-        appointment_query_set = Appointment.objects.filter(id = appointment_id, approval_status = True, payment = None)
+        appointment_query_set = Appointment.objects.filter(id = appointment_id, approval_status = True, prescription_status = False)
         if not appointment_query_set:
             res = {"message" : f"There is no such appointment with id : {appointment_id}"}
             return JsonResponse(res, status = 400)
         appointment_query_set.update(cure_status = True, last_modified_by_doctor = datetime.datetime.now())
         res = {"message" : f"Appointment with id = {appointment_id} is scheduled on {appointment_query_set[0].requested_for}"}
         return JsonResponse(res, status = 200)
+    elif request.method == "DELETE":
+        data = json.loads(request.body)
+        appointment_id = data.get("appointment_id")
+        remark = data.get("remark")
+        if not remark:
+            res = {"message" : "Remark is required"}
+            return JsonResponse(res, status = 400)
+        if not appointment_id:
+            res = {"message" : "Appointment_id is required"}
+            return JsonResponse(res, status = 400)
+        appointment_query_set = Appointment.objects.filter(id = appointment_id, approval_status = True, cure_status = False, prescription_status = False)
+        if not appointment_query_set:
+            res = {"message" : f"There does not exist any appointment with appointment_id : {appointment_id}"}
+            return JsonResponse(res, status = 404)
+        appointment_obj = appointment_query_set[0]
+        if appointment_obj.cure_status:
+            res = {"message" : "The appointment is already scheduled"}
+            return JsonResponse(res, 400)
+        else:
+            appointment_query_set.update(remark = remark, last_modified_by_doctor = datetime.datetime.now(), rejection_status = True)
+            res = {"message" : f"Appointment with appointment id = {appointment_id} has been rejected"}
+            return JsonResponse(res, status = 200)
     else:
         res = {"message" : "Invalid request method"}
         return JsonResponse(res, status = 405)
+    
+def prescription(request):
+    if not request.user.is_authenticated:
+        res = {"message" : "Login is required !!!"}
+        return JsonResponse(res, status = 401)
+    if not request.user.is_doctor:
+        res = {"message" : "Feature only available to doctors only"}
+        return JsonResponse(res, status = 403)
+    if request.method == "POST":
+        data = request.POST
+        appointment_id = data.get("appointment_id")
+        # appointment_obj = Appointment.objects.filter(id = appointment_id)[0]
+        medicine_list = data.getlist("medicine")
+        frequency_list = data.getlist("freq")
+        number_of_days_list = data.getlist("qty")
+        print(medicine_list)
+        print(frequency_list)
+        print(number_of_days_list)
+        # for i in range(len(medicine_list)):
+        #     medicine = medicine_list[i]
+        #     frequency = frequency_list[i]
+        #     number_of_days = number_of_days_list[i]
+        #     prescription_obj = Prescription.objects.create(medicine = medicine, frequency = frequency, number_of_days = number_of_days)
+        #     prescription_obj.appointment.add(appointment_obj)
+        # res = {"message" : "Prescription is generated successfully"}
+        # return JsonResponse(res, status = 201)
+
+
+        
+
         

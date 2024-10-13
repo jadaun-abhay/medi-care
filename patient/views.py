@@ -131,7 +131,11 @@ def appointment(request):
     if request.method == "POST":
         data = json.loads(request.body)
         preferred_doctor = data.get("preferred_doctor_id")
-        preferred_doctor_obj = CustomUser.objects.filter(id = preferred_doctor)[0]
+        preferred_doctor_obj = CustomUser.objects.filter(id = preferred_doctor, is_doctor = True)
+        if not preferred_doctor_obj:
+            res = {"message" : "Doctor is not known to us"}
+            return JsonResponse(res, status = 400)
+        preferred_doctor_obj = preferred_doctor_obj[0]
         applied_for = data.get("applied_for")
         date_time_list = applied_for.split(", ")
         date = date_time_list[0]
@@ -144,37 +148,68 @@ def appointment(request):
         if not (preferred_doctor and applied_for and problem_description and symptoms):
             res = {"messsage" : "Some fields are missing"}
             return JsonResponse(res, status = 400)
-        apntmnt_query_set = request.user.appointment_set.filter(requested_for = applied_for, cure_status = False)
-        if apntmnt_query_set:
-            res = {"message" : f"Your appointment is already booked on {apntmnt_query_set[0].requested_for.strftime("%d/%b/%Y at %H:%M:%S")}", "data" : {"appointment_id" : apntmnt_query_set[0].id}}
+        new_appointment_status = False
+        booked_appointment_date = ""
+        booked_appointment_time_hour = -1
+        applied_for_date = ""
+        applied_for_time_hour = -1
+        appointment_obj = request.user.appointment_set.filter(rejection_status = False, prescription_status = False, requested_for = applied_for)
+        if appointment_obj:
+            res = {"message" : f"Your appointment is already booked on {appointment_obj[0].requested_for.strftime("%d/%b/%Y at %H:%M:%S")}", "data" : {"appointment_id" : appointment_obj[0].id}}
             return JsonResponse(res, status = 400)
-        request.user.appointment_set.create(preferred_doctor = preferred_doctor_obj, problem_description = problem_description, symptoms = symptoms, requested_for = applied_for)
-        res = {"message" : "success", "data" : "Appointment has been booked"}
-        return JsonResponse(res, status = 201)
+        else:
+            if appointment_obj:
+                booked_appointment_date = appointment_obj[0].requested_for.date()
+                booked_appointment_time_hour = appointment_obj[0].requested_for.time().strftime("%H")
+                applied_for_date = applied_for.date()
+                applied_for_time_hour = applied_for.time().strftime("%H")
+            else:
+                new_appointment_status = True
+        if (booked_appointment_date == applied_for_date and (applied_for_time_hour == str(int(booked_appointment_time_hour+1)) or applied_for_time_hour == str(int(booked_appointment_time_hour-1)))) or new_appointment_status:
+            request.user.appointment_set.create(preferred_doctor = preferred_doctor_obj, problem_description = problem_description, symptoms = symptoms, requested_for = applied_for)
+            res = {"message" : "success", "data" : "Appointment has been booked succesfully"}
+            return JsonResponse(res, status = 201)
+        else:
+            res = {"message" : "Doctor is not available at the requested time. Try requesting for 1 hour before or after. Otherwise try for another date"}
+            return JsonResponse(res, status = 400)
     elif request.method == "GET":
-        appointment_query_set = request.user.appointment_set.filter(payment = None)
-        res = {"message" : "success", "data" : {"pending_appointments" : [], "shceduled_appointments" : []}}
-        print(appointment_query_set[0])
+        appointment_query_set = request.user.appointment_set.all()
+        if not appointment_query_set:
+            res = {"message" : "You haven't booked any appointments to show"}
+            return JsonResponse(res, status = 202)
+        res = {"message" : "success", "data" : {"pending_appointments" : [], "scheduled_appointments" : [], "rejected_appointments" : [], "payment_appointments" : [], "success_appointments" : []}}
+        # print(appointment_query_set.values())
         for appointment in appointment_query_set:
             my_dict = {}
             appointment_id = appointment.id
             my_dict["appointment_id"] = appointment_id
             problem_description = appointment.problem_description
             my_dict["problem_description"] = problem_description
-            requested_at = appointment.requested_at
+            requested_at = appointment.requested_at.strftime("%d/%b/%Y at %H:%M:%S")
             my_dict["requested_at"] = requested_at
-            requested_for = appointment.requested_for
+            requested_for = appointment.requested_for.strftime("%d/%b/%Y at %H:%M:%S")
             my_dict["requested_for"] = requested_for
-            preferred_doctor_id = appointment.preferred_doctor
-            my_dict["preferred_doctor_id"] = preferred_doctor_id.id
+            preferred_doctor = appointment.preferred_doctor
+            my_dict["preferred_doctor_id"] = preferred_doctor.id
+            speciality = appointment.preferred_doctor.doctorinfo_set.reverse()[0].speciality.speciality
+            my_dict["speciality"] = speciality
             preferred_doctor_name = appointment.preferred_doctor.first_name
             if appointment.preferred_doctor.last_name:
                 preferred_doctor_name += " " + appointment.preferred_doctor.last_name
             my_dict["preferred_doctor_name"] = preferred_doctor_name
-            if appointment.approval_status == False or (appointment.approval_status == True and appointment.cure_status == False):
+
+            if appointment.rejection_status == False and appointment.cure_status == False:
                 res["data"]["pending_appointments"].append(my_dict)
             if appointment.cure_status == True:
-                res["data"]["shceduled_appointments"].append(my_dict)
+                res["data"]["scheduled_appointments"].append(my_dict)
+            if appointment.rejection_status == True:
+                my_dict["remark"] = appointment.remark
+                res["data"]["rejected_appointments"].append(my_dict)
+            if appointment.prescription_status == True:
+                # Will be added
+                res["data"]["payment_appointments"].append(my_dict)
+            if appointment.payment == True:
+                res["data"]["success_appointments"].append(my_dict)
         return JsonResponse(res, status = 200)
     else:
         res = {"message" : "Invalid request method"}

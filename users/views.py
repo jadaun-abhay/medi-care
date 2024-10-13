@@ -183,7 +183,7 @@ def appointments(request):
         res = {"message" : "Feature is only available for the receptionist"}
         return JsonResponse(res, status = 403)
     if request.method == "GET":
-        appointment_obj = Appointment.objects.filter(cure_status = False, remark = None)
+        appointment_obj = Appointment.objects.filter(rejection_status = False, cure_status = False)
         res = {"message" : "success", "data" : {"approved_appointments" : [], "non_approved_appointments" : []}}
         for appointment in appointment_obj:
             apntmnt_dict = {}
@@ -197,9 +197,9 @@ def appointments(request):
                 patient_name += " " + last_name
             apntmnt_dict["patient_name"] = patient_name
             problem = appointment.problem_description
+            apntmnt_dict["problem_description"] = problem
             approval_status = appointment.approval_status
             apntmnt_dict["receptionist_approval_status"] = approval_status
-            apntmnt_dict["problem_description"] = problem
             symptoms = appointment.symptoms
             apntmnt_dict["symptoms"] = symptoms
             date_time = appointment.requested_at.strftime("%d/%b/%Y at %H:%M:%S")
@@ -211,9 +211,8 @@ def appointments(request):
             if last_name:
                 doctor_name += " " + last_name
             apntmnt_dict["preferred_doctor_name"] = doctor_name
-            speciality_id = appointment.preferred_doctor.doctorinfo_set.values_list("speciality", flat = True)[0]
-            doc_speciality = Speciality.objects.get(id = speciality_id).speciality
-            apntmnt_dict["doctor_speciality"] = doc_speciality
+            speciality = appointment.preferred_doctor.doctorinfo_set.reverse()[0].speciality.speciality
+            apntmnt_dict["doctor_speciality"] = speciality
             if appointment.approval_status:
                 res["data"]["approved_appointments"].append(apntmnt_dict)
             else:
@@ -222,13 +221,12 @@ def appointments(request):
     elif request.method == "PATCH":
         data = json.loads(request.body)
         appointment_id = data.get("appointment_id")
-        patient_id = data.get("patient_id")
-        appointment_obj = Appointment.objects.filter(id = appointment_id)
+        appointment_obj = Appointment.objects.filter(id = appointment_id, payment = False)[0]
         if not appointment_obj:
-            res = {"message" : "No appointments are booked for the selected patient"}
+            res = {"message" : "There are no such appointments with such id"}
             return JsonResponse(res, status = 202)
         elif appointment_obj.cure_status:
-            res = {"message" : "Patient is approved to meet to the doctor"}
+            res = {"message" : "Patient is already approved to meet to the doctor"}
             return JsonResponse(res, status = 400)
         else:
             approval_status = appointment_obj.approval_status
@@ -237,14 +235,14 @@ def appointments(request):
             res = {"message" : "Appointment is one step behind to be confirmed by doctor"}
             return JsonResponse(res, status = 406)
         else:
-            is_doctor_free = Appointment.objects.filter(cure_status = True, requested_for = requested_for)
+            is_doctor_free = Appointment.objects.filter(cure_status = True, preferred_doctor = appointment_obj.preferred_doctor, rejection_status = 0, requested_for = requested_for, payment = False, prescription_status = False)
             if not is_doctor_free:
                 Appointment.objects.filter(id = appointment_id).update(approval_status = True, last_modified_by_receptionist = datetime.datetime.now())
                 res = {"message" : "Appointment is approved and sent to doctor for his/her approval"}
                 return JsonResponse(res, status = 201)
             else:
                 Appointment.objects.filter(id = appointment_id).update(approval_status = False, remark = f"Already have an appointment fixed on {requested_for}", last_modified_by_receptionist = datetime.datetime.now())
-                res = {"message" : "Patient already have an appointment at requested date"}
+                res = {"message" : f"Doctor is not avaiable on {requested_for.strftime("%d/%b/%Y at %H:%M:%S")}"}
                 return JsonResponse(res, status = 400)
     elif request.method == "DELETE":
         data = json.loads(request.body)
@@ -253,11 +251,11 @@ def appointments(request):
         if not remark:
             res = {"message" : "Remark is required !!!"}
             return JsonResponse(res, status = 400)
-        appointment_obj = Appointment.objects.filter(id = appointment_id, cure_status = False)[0]
+        appointment_obj = Appointment.objects.filter(id = appointment_id)[0]
         if appointment_obj.cure_status:
             res = {"message" : "The appointment has been confirmed by the doctor"}
             return JsonResponse(res, status = 400)
-        Appointment.objects.filter(id = appointment_id).update(remark = remark)
+        Appointment.objects.filter(id = appointment_id).update(remark = remark, last_modified_by_receptionist = datetime.datetime.now(), rejection_status = True)
         res = {"message" : f"Appointment with appointment id = {appointment_id} has been rejected"}
         return JsonResponse(res, status = 200)
     else:
