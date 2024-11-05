@@ -18,11 +18,15 @@ class CustomUserManager(UserManager):
         return self.create_user(email = email, password = password, **kwargs)
     
     def create_patient(self, email, password, **kwargs):
-        kwargs.setdefault("is_patient", True)
+        from .models import Roles
+        role = Roles.objects.get(id = 3)
+        kwargs.setdefault("role", role)
 
         return self.create_user(email = email, password = password, **kwargs)
     
     def create_doctor(self, email, password, **kwargs):
-        kwargs.setdefault("is_doctor" ,True)
+        from .models import Roles
+        role = Roles.objects.get(id = 1)
+        kwargs.setdefault("role" ,role)
 
         return self.create_user(email = email, password = password, **kwargs)

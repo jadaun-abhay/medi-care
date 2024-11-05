@@ -7,7 +7,7 @@ from users.models import CustomUser
 class Speciality(models.Model):
 
     def nameFile(self, filename):
-        return '/'.join(["speciality", self.speciality, filename])
+        return '/'.join(["speciality", f"{self.speciality}", filename])
     
     speciality = models.TextField()
     study = models.TextField()
@@ -26,14 +26,14 @@ class DoctorInfo(models.Model):
     speciality = models.ForeignKey(Speciality, on_delete = models.SET_NULL, null = True)
     gender = models.CharField(max_length = 6)
     address = models.TextField()
-    profile_photo = models.ImageField(upload_to = nameFile, default = '/'.join(["doctor", "default_profile", "profile.jpeg"]))
+    profile_photo = models.ImageField(upload_to = nameFile, default = '/'.join(["default_profile", "profile.jpeg"]))
     fees = models.CharField(max_length = 30)
 
     class Meta:
         db_table = "doctor_info"
 
 class PaymentDetails(models.Model):
-    prescription = models.ForeignKey("patient.Prescription", on_delete = models.SET_NULL, null = True)
+    appointment = models.ForeignKey("patient.Appointment", on_delete = models.SET_NULL, null = True)
     amount = models.SmallIntegerField()
     payment_status = models.BooleanField(default = True)
 

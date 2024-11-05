@@ -3,24 +3,32 @@ from django.shortcuts import render
 # Create your views here.
 
 import json
-from users.models import CustomUser
+from users.models import CustomUser, Roles
 from django.http import JsonResponse
 from django.contrib.auth import authenticate
 from django.contrib.auth import login as l_in
 from django.contrib.auth import logout as l_out
 from doctor.models import DoctorInfo, Speciality
-from patient.models import Appointment
+from patient.models import Appointment, AppointmentInfo
 import datetime
 from .models import LeftPanel
+from .functions import send_payment_request_mail
 
 def index(request):
     if request.method == "GET":
         if not request.user.is_authenticated:
             res = {"message" : "Login is required !!!"}
             return JsonResponse(res, status = 401)
-        panel_obj = LeftPanel.objects.filter(for_receptionist = True).values("title", "state", "priority", "icon")
-        res = {"message" : "success", "data" : {"title" : "RECEPTIONIST", "children" : []}}
-        for option in panel_obj:
+        user_role = request.user.role
+        left_panel_query_set = LeftPanel.objects.filter(role = user_role).values("title", "state", "priority", "icon")
+        print(left_panel_query_set)
+        if not left_panel_query_set:
+            res = {"message" : "Requested role is not known"}
+            return JsonResponse(res, status = 400)
+        left_panel_obj = left_panel_query_set[0]
+        # panel_obj = LeftPanel.objects.all().values("title", "state", "priority", "icon")
+        res = {"message" : "success", "data" : {"title" : user_role.role , "children" : []}}
+        for option in left_panel_query_set:
             optn_dict = {}
             title = option.get("title")
             optn_dict["title"] = title
@@ -41,48 +49,36 @@ def login(request):
         data = json.loads(request.body)
         email = data.get("email")
         password = data.get("password")
-        user_obj = CustomUser.objects.filter(email = email).values("is_doctor", "is_patient", "is_superuser")
-        if user_obj is None or not user_obj:
-            res = {"message" : "User is not registered"}
+        if not (email and password):
+            res = {"message" : "Information given is not sufficient"}
+            return JsonResponse(res, status = 400)
+        user_query_set = CustomUser.objects.filter(email = email)
+        if not user_query_set:
+            res = {"message" : "Email is not registered"}
             return JsonResponse(res, status = 401)
-        is_doctor = user_obj[0].get("is_doctor")
-        is_patient = user_obj[0].get("is_patient")
-        is_receptionist = user_obj[0].get("is_superuser")
+        user_obj = user_query_set[0]
+        role_state = user_obj.role.state
         user = authenticate(email = email, password = password)
         if user:
             l_in(request, user)
-            res = {"message" : "Login is successfull", "data" : {"is_patient" : is_patient, "is_doctor" : is_doctor, "is_receptionist" : is_receptionist}}
+            res = {"message" : "Login is successfull", "data" : {"state" : role_state}}
             return JsonResponse(res, status = 200)
         else:
             res = {"message" : "Incorrect password"}
             return JsonResponse(res, status = 401)
     elif request.method == 'GET':
         if request.user.is_authenticated:
-            is_doctor = request.user.is_doctor
-            is_patient = request.user.is_patient
-            if is_doctor:
-                name = request.user.first_name
-                last_name = request.user.last_name
-                if not last_name:
-                    name = name + " " + last_name
-                profile_image = request.user.doctorinfo_set.filter(doctor = request.user.id).values_list("profile_photo", flat = True)[0]
-            elif is_patient:
-                name = request.user.first_name
-                last_name = request.user.last_name
-                if not (last_name is None or last_name == ""):
-                    name += " " + last_name
-                profile_image = request.user.patientinfo_set.filter(patient = request.user.id).values_list("profile_photo", flat = True)[0]
-            else:
-                name = request.user.first_name
-                last_name = request.user.last_name
-                if not last_name:
-                    name += " " + last_name
-                profile_image = "/".join(["doctor", "default_profile", "profile.jpeg"])
-            is_receptionist = request.user.is_superuser
-            res = {"message" : "Login is successfull", "data" : {"is_patient" : is_patient, "is_doctor" : is_doctor, "is_receptionist" : is_receptionist}, "profile_data" : {"name" : name, "photo" : profile_image}}
+            role_obj = request.user.role
+            state = role_obj.state
+            name = request.user.first_name
+            last_name = request.user.last_name
+            if last_name:
+                name +=  " " + last_name
+            profile_image = request.user.profile_photo.name
+            res = {"message" : "Login is successfull", "data" : {"state" : state}, "profile_data" : {"name" : name, "photo" : profile_image}}
             return JsonResponse(res, status = 200)
         else:
-            res = {"message" : "Login is required"}
+            res = {"message" : "Login is required !!!"}
             return JsonResponse(res, status = 401)
     else:
         res = {"message" : "Invalid request method"}
@@ -100,7 +96,7 @@ def logout(request):
     else:
         res = {"message" : "Invalid request method"}
         return JsonResponse(res, status = 405)
-    
+
 def speaciality_list(request):
     if request.method == "GET":
         speciality_obj = Speciality.objects.all().values()
@@ -113,7 +109,7 @@ def speaciality_list(request):
         if not request.user.is_authenticated:
             res = {"message" : "Login is required !!!"}
             return JsonResponse(res, status = 401)
-        if not request.user.is_superuser:
+        if not request.user.role.role != "Receptionist":
             res = {'message' : "Feature is only available for the Receptionist"}
             return JsonResponse(res, status = 403)
         data = request.POST
@@ -121,6 +117,9 @@ def speaciality_list(request):
         study = data.get("study")
         related_image = request.FILES.get("image")
         description = data.get("description")
+        if not (speciality and study and related_image and description):
+            res = {"message" : "Information given is not sufficient"}
+            return JsonResponse(res, status = 400)
         speciality_obj = Speciality.objects.filter(speciality = speciality)
         if speciality_obj:
             res = {"message" : f"{speciality} already exists"}
@@ -157,17 +156,15 @@ def get_doctors_under_specific_speciality(request):
             first_name = dr.doctor.first_name
             doc_dict["name"] = first_name
             last_name = dr.doctor.last_name
-            if last_name == "":
-                last_name = None
-            else:
+            if last_name:
                 doc_dict["name"] += " " + last_name
             gender = dr.gender
             doc_dict["gender"] = gender
             speciality = dr.speciality.speciality
             doc_dict["speciality"] = speciality
             fees = dr.fees
-            doc_dict["fee"] = 500   #To be set
-            profile_photo = dr.profile_photo
+            doc_dict["fee"] = fees
+            profile_photo = dr.doctor.profile_photo
             doc_dict["photo"] = profile_photo.name
             res["data"].append(doc_dict)
         return JsonResponse(res, status = 200)
@@ -179,13 +176,16 @@ def appointments(request):
     if not request.user.is_authenticated:
         res = {"message" : "Login is required !!!"}
         return JsonResponse(res, status = 401)
-    if not request.user.is_staff:
+    if not request.user.role.role == "Receptionist":
         res = {"message" : "Feature is only available for the receptionist"}
         return JsonResponse(res, status = 403)
     if request.method == "GET":
-        appointment_obj = Appointment.objects.filter(rejection_status = False, cure_status = False)
-        res = {"message" : "success", "data" : {"approved_appointments" : [], "non_approved_appointments" : []}}
-        for appointment in appointment_obj:
+        appointment_query_set = Appointment.objects.all()
+        if not appointment_query_set:
+            res = {"message" : "success", "data" : {"approved_appointments" : [], "rejected_appointments" : [], "requested_appointments" : [], "appointment_transaction_history" : [], "pending_payments" : []}}
+            return JsonResponse(res, status = 200)
+        res = {"message" : "success", "data" : {"approved_appointments" : [], "rejected_appointments" : [], "requested_appointments" : [], "appointment_transaction_history" : [], "pending_payments" : []}}
+        for appointment in appointment_query_set:
             apntmnt_dict = {}
             appointment_id = appointment.id
             apntmnt_dict["appointment_id"] = appointment_id
@@ -198,13 +198,11 @@ def appointments(request):
             apntmnt_dict["patient_name"] = patient_name
             problem = appointment.problem_description
             apntmnt_dict["problem_description"] = problem
-            approval_status = appointment.approval_status
-            apntmnt_dict["receptionist_approval_status"] = approval_status
             symptoms = appointment.symptoms
             apntmnt_dict["symptoms"] = symptoms
-            date_time = appointment.requested_at.strftime("%d/%b/%Y at %H:%M:%S")
-            apntmnt_dict["applied_at"] = date_time
-            requested_for = appointment.requested_for.strftime("%d/%b/%Y at %H:%M:%S")
+            requested_at = appointment.requested_at.strftime("%d/%b/%Y at %H:%M:%S")
+            apntmnt_dict["applied_at"] = requested_at
+            requested_for = appointment.requested_for.strftime("%d/%b/%Y")
             apntmnt_dict["requested_for"] = requested_for
             last_name = appointment.preferred_doctor.last_name
             doctor_name = appointment.preferred_doctor.first_name
@@ -213,52 +211,133 @@ def appointments(request):
             apntmnt_dict["preferred_doctor_name"] = doctor_name
             speciality = appointment.preferred_doctor.doctorinfo_set.reverse()[0].speciality.speciality
             apntmnt_dict["doctor_speciality"] = speciality
-            if appointment.approval_status:
-                res["data"]["approved_appointments"].append(apntmnt_dict)
+            appointment_info_query_set = appointment.appointmentinfo_set.reverse()
+            if not appointment_info_query_set:
+                res["data"]["requested_appointments"].append(apntmnt_dict)
             else:
-                res["data"]["non_approved_appointments"].append(apntmnt_dict)
+                appointment_info_obj = appointment_info_query_set[0]
+                if appointment_info_obj.receptionist_approval_status == False and appointment_info_obj.rejection_status == False:
+                    res["data"]["requested_appointments"].append(apntmnt_dict)
+                if appointment_info_obj.receptionist_approval_status == True and appointment_info_obj.rejection_status == False and appointment_info_obj.prescription_status == False:
+                    if appointment_info_obj.payment_status:
+                        apntmnt_dict["payment_status"] = "Paid"
+                    else:
+                        apntmnt_dict["payment_status"] = "Unpaid"
+                    if appointment_info_obj.doctor_approval_status:
+                        apntmnt_dict["doctor_approval_status"] = "Approved"
+                    else:
+                        apntmnt_dict["doctor_approval_status"] = "Not Approved"
+                    res["data"]["approved_appointments"].append(apntmnt_dict)
+                if appointment_info_obj.rejection_status == True:
+                    if appointment_info_obj.receptionist_approval_status:
+                        apntmnt_dict["receptionist_approval_status"] = "Accepted"
+                        if appointment_info_obj.payment_status:
+                            apntmnt_dict["payment_status"] = "Paid"
+                            if appointment_info_obj.doctor_approval_status:
+                                apntmnt_dict["doctor_approval_status"] = "Approved"
+                            else:
+                                apntmnt_dict["doctor_approval_status"] = "Rejected"
+                                apntmnt_dict["remark"] = appointment_info_obj.remark
+                                apntmnt_dict["payment_status"] = "Will be refunded"
+                        else:
+                            apntmnt_dict["payment_status"] = "Unpaid"
+                            apntmnt_dict["doctor_approval_status"] = "NA"
+                    else:
+                        apntmnt_dict["receptionist_approval_status"] = "Not Approved"
+                        apntmnt_dict["remark"] = appointment_info_obj.remark
+                        apntmnt_dict["doctor_approval_status"] = "NA"
+                        apntmnt_dict["payment_status"] = "NA"
+                    res["data"]["rejected_appointments"].append(apntmnt_dict)
+                if appointment_info_obj.receptionist_approval_status == True and appointment_info_obj.payment_status == False and appointment_info_obj.rejection_status == False:
+                    res["data"]["pending_payments"].append(apntmnt_dict)
+                if appointment_info_obj.payment_status == True and appointment_info_obj.prescription_status == True:
+                    appointment_id = appointment.id
+                    # payment = appointment.paymentdetails_set.values("id", "amount")
+                    # payment_id = payment[0]
+                    # amount_paid = payment[1]
+                    apntmnt_dict["payment_id"] = 7
+                    apntmnt_dict["amount_paid"] = 5000000
+                    res["data"]["appointment_transaction_history"].append(apntmnt_dict)
         return JsonResponse(res ,status = 200)
     elif request.method == "PATCH":
         data = json.loads(request.body)
         appointment_id = data.get("appointment_id")
-        appointment_obj = Appointment.objects.filter(id = appointment_id, payment = False)[0]
-        if not appointment_obj:
-            res = {"message" : "There are no such appointments with such id"}
-            return JsonResponse(res, status = 202)
-        elif appointment_obj.cure_status:
-            res = {"message" : "Patient is already approved to meet to the doctor"}
+        if not appointment_id:
+            res = {"message" : "Information given is not suffcient"}
             return JsonResponse(res, status = 400)
+        appointment_query_set = Appointment.objects.filter(id = appointment_id)
+        if not appointment_query_set:
+            res = {"message" : "There is no such appointment with such id"}
+            return JsonResponse(res, status = 202)
+        appointment_obj = appointment_query_set[0]
+        appointment_info_query_set = appointment_obj.appointmentinfo_set.reverse()
+        if not appointment_info_query_set:
+            appointment_obj.appointmentinfo_set.create(receptionist_approval_status = True, last_modified_by_receptionist = datetime.datetime.now())
+            res = {"message" : "Appointment has been approved succesfully and sent to the respective doctor for his/her approval"}
+            send_payment_request_mail(appointment_obj.requested_at.strftime("%d/%b/%Y at %H:%M:%S"), "abhay.2327cseml1085@kiet.edu", datetime.datetime.now(), appointment_obj.preferred_doctor.first_name)
+            return JsonResponse(res, status = 201)
         else:
-            approval_status = appointment_obj.approval_status
-            requested_for = appointment_obj.requested_for
-        if approval_status:
-            res = {"message" : "Appointment is one step behind to be confirmed by doctor"}
-            return JsonResponse(res, status = 406)
-        else:
-            is_doctor_free = Appointment.objects.filter(cure_status = True, preferred_doctor = appointment_obj.preferred_doctor, rejection_status = 0, requested_for = requested_for, payment = False, prescription_status = False)
-            if not is_doctor_free:
-                Appointment.objects.filter(id = appointment_id).update(approval_status = True, last_modified_by_receptionist = datetime.datetime.now())
-                res = {"message" : "Appointment is approved and sent to doctor for his/her approval"}
-                return JsonResponse(res, status = 201)
+            appointment_info_obj = appointment_info_query_set[0]
+            if appointment_info_obj.receptionist_approval_status == True and appointment_info_obj.rejection_status == False:
+                if appointment_info_obj.doctor_approval_status == True:
+                    res = {"message" : "Patient is already approved to meet the doctor"}
+                    return JsonResponse(res, status = 409)
+                else:
+                    res = {"message" : "Appointment is one step behind to get the prescription"}
+                    return JsonResponse(res, status = 409)
             else:
-                Appointment.objects.filter(id = appointment_id).update(approval_status = False, remark = f"Already have an appointment fixed on {requested_for}", last_modified_by_receptionist = datetime.datetime.now())
-                res = {"message" : f"Doctor is not avaiable on {requested_for.strftime("%d/%b/%Y at %H:%M:%S")}"}
-                return JsonResponse(res, status = 400)
+                if appointment_info_obj.receptionist_approval_status == False:
+                    appointment_obj.appointmentinfo_set.values().update(receptionist_approval_status = True, last_modified_by_receptionist = datetime.datetime.now())
+                    res = {"message" : "Appointment has been approved succesfully and sent to the respective doctor for his/her approval"}
+                    send_payment_request_mail(appointment_obj.requested_at.strftime("%d/%b/%Y at %H:%M:%S"), "abhay.2327cseml1085@kiet.edu", datetime.datetime.now(), appointment_obj.preferred_doctor.first_name)
+                    return JsonResponse(res, status = 201)
+                else:
+                    res = {"message" : "Appointment request is sent to doctor for their approval"}
+                    return JsonResponse(res, status = 409)
     elif request.method == "DELETE":
         data = json.loads(request.body)
         appointment_id = data.get("appointment_id")
+        if not appointment_id:
+            res = {"message" : "Information given is not sufficient"}
+            return JsonResponse(res, status = 400)
         remark = data.get("remark")
         if not remark:
             res = {"message" : "Remark is required !!!"}
             return JsonResponse(res, status = 400)
-        appointment_obj = Appointment.objects.filter(id = appointment_id)[0]
-        if appointment_obj.cure_status:
-            res = {"message" : "The appointment has been confirmed by the doctor"}
+        appointment_query_set = Appointment.objects.filter(id = appointment_id)
+        if not appointment_query_set:
+            res = {"message" : "appointment_id does not exist"}
             return JsonResponse(res, status = 400)
-        Appointment.objects.filter(id = appointment_id).update(remark = remark, last_modified_by_receptionist = datetime.datetime.now(), rejection_status = True)
-        res = {"message" : f"Appointment with appointment id = {appointment_id} has been rejected"}
+        appointment_obj = appointment_query_set[0]
+        appointment_info_query_set = appointment_obj.appointmentinfo_set.values()
+        if not appointment_info_query_set:
+            appointment_obj.appointmentinfo_set.create(rejection_status = True, remark = remark, last_modified_by_receptionist = datetime.datetime.now())
+            res = {"message" : "Appointment has been rejected successfully"}
+            return JsonResponse(res, status = 200)
+        else: 
+            appointment_info_obj = appointment_info_query_set[0]
+            if appointment_info_obj.rejection_status == False:
+                appointment_obj.appointmentinfo_set.values().update(rejection_status = True, last_modified_by_receptionist = datetime.datetime.now, remark = remark)
+                res = {"message" : "Appointment has been rejected successfully"}
+                return JsonResponse(res, status = 200)
+            else:
+                res = {"message" : "Appointment is already rejected"}
+                return JsonResponse(res, status = 400)
+    else:
+        res = {"message" : "Invalid request method"}
+        return JsonResponse(res, status = 405)
+
+def get_profile(request):
+    if not request.user.is_authenticated:
+        res = {"message" : "Login is required"}
+        return JsonResponse(res, status = 401)
+    if not request.user.is_staff:
+        res = {"message" : "Only receptionist can see his profile"}
+        return JsonResponse(res, status = 403)
+    if request.method == "GET":
+        profile_obj = CustomUser.objects.filter(id = request.user.id).values("id", "first_name", "last_name", "email", "phone_number")
+        res = dict(profile_obj)
         return JsonResponse(res, status = 200)
     else:
         res = {"message" : "Invalid request method"}
         return JsonResponse(res, status = 405)
-        

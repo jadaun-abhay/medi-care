@@ -6,5 +6,6 @@ urlpatterns = [
     path("", views.index),
     path("register/", views.registration),
     path("appointments/", views.appointments),
-    path("prescription/", views.prescription),
+    path("prescription/", views.give_prescription),
+    path("profile/", views.profile),
 ]

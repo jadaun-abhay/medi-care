@@ -8,40 +8,26 @@ import re
 from users.models import CustomUser, LeftPanel
 from django.conf import settings
 from doctor.models import Speciality
-from patient.models import Appointment,Prescription
+from patient.models import Appointment,Prescription, AppointmentInfo
 import datetime
+from .functions import generate_pdf
+from django.contrib.auth import authenticate
+from django.contrib.auth import login as l_in
 
 
 
 def index(request):
-    if request.method == "GET":
-        if not request.user.is_authenticated:
-            res = {"message" : "Login is required !!!"}
-            return JsonResponse(res, status = 401)
-        panel_obj = LeftPanel.objects.filter(for_doctor = True).values("title", "state", "priority", "icon")
-        res = {"message" : "success", "data" : {"title" : "DOCTOR", "children" : []}}
-        for option in panel_obj:
-            optn_dict = {}
-            title = option.get("title")
-            optn_dict["title"] = title
-            state = option.get("state")
-            optn_dict["state"] = state
-            priority = option.get("priority")
-            optn_dict["priority"] = priority
-            icon = option.get("icon")
-            optn_dict["icon"] = icon
-            res["data"]["children"].append(optn_dict)
-        return JsonResponse(res, status = 200)
-    else:
-        res = {"message" : "Invalid request method"}
-        return JsonResponse(res, status = 405)
+    res = {"message" : "doctor app index api"}
+    return JsonResponse(res, status = 200)
     
 def registration(request):
     if request.method == "POST":
         data = request.POST
         email = data.get("email")
         first_name = data.get("first_name")
+        first_name = first_name.capitalize()
         last_name = data.get("last_name")
+        last_name = last_name.capitalize()
         phone_number = data.get("phone_no")
         password = data.get("password_1")
         confirm_password = data.get("password_2")
@@ -60,7 +46,7 @@ def registration(request):
                 res = {"message" : "Invalid image content type"}
                 return JsonResponse(res, status = 400)
         if not (email and first_name and phone_number and password and confirm_password and gender and speciality_id and address):
-            res = {'message' : "Some field is missing"}
+            res = {'message' : "Information given is not sufficient"}
             return JsonResponse(res, status = 400)
         if last_name is None:
             last_name = ""
@@ -87,17 +73,19 @@ def registration(request):
         if speciality_obj is None:
             res = {"message" : "Speciality is not known"}
             return JsonResponse(res, status = 400)
-        user_obj = CustomUser.objects.filter(email = email).values("email")
-        if user_obj:
+        user_query_set = CustomUser.objects.filter(email = email)
+        if user_query_set:
             res = {"message" : "E-mail is already registered"}
             return JsonResponse(res, status = 409)
         if password == confirm_password:
             user_obj = CustomUser.objects.create_doctor(password = password, first_name = first_name, last_name = last_name, email = email, phone_number = phone_number)
-            if image is None:
-                user_obj.doctorinfo_set.create(gender = gender, speciality = speciality_obj, address = address)
-            else:
-                user_obj.doctorinfo_set.create(gender = gender, speciality = speciality_obj, address = address, profile_photo = image)
+            user_obj.doctorinfo_set.create(gender = gender, speciality = speciality_obj, address = address)
+            if image:
+                user_obj.profile_photo = image
+                user_obj.save()
             res = {"message" : "Doctor registration is successful"}
+            user = authenticate(email = email, password = password)
+            l_in(request, user)
             return JsonResponse(res, status = 201)
         else:
             res = {"message" : "Confirm password is not matching"}
@@ -110,17 +98,36 @@ def appointments(request):
     if not request.user.is_authenticated:
         res = {"message" : "Login is required !!!"}
         return JsonResponse(res, status = 401)
-    if not request.user.is_doctor:
+    if not request.user.role.role == "Doctor":
         res = {"message" : "Feature is only available for doctors only"}
         return JsonResponse(res, status = 403)
     if request.method == "GET":
-        appointment_obj = Appointment.objects.filter(preferred_doctor = request.user, rejection_status = False, prescription_status = False)
-        if appointment_obj is None:
-            res = {"message" : "There are no appointments for you"}
-            return JsonResponse(res, status = 202)
+        appointment_query_set = Appointment.objects.filter(preferred_doctor = request.user)
+        appointment_obj = ""
+        if not appointment_query_set:
+            res = {"message" : "There are no appointments for you to show"}
+            return JsonResponse(res, status = 404)
+        else:
+            appointment_obj = appointment_query_set[0]
+            appointment_info_query_set = appointment_obj.appointmentinfo_set.reverse()
+            if appointment_info_query_set:
+                flag = True
+                for appointment_info in appointment_info_query_set:
+                    appointment_info_obj = appointment_info
+                    if appointment_info_obj.rejection_status == False and appointment_info_obj.receptionist_approval_status == False:
+                        flag = False
+                    else:
+                        flag = True
+                        break
+                if not flag:
+                    res = {"message" : "No action has been taken by the receptionist on the requested appointments"}
+                    return JsonResponse(res, status = 400)
+            else:
+                res = {"message" : "Receptionist has not forwarded the appointment requests"}
+                return JsonResponse(res, status = 202)
         res = {"message" : "success", "data" : {"scheduled_appointments" : [], "previous_appointments" : [], "requested_appointments" : []}}
         apntmnt_dict = {}
-        for appointment in appointment_obj:
+        for appointment in appointment_query_set:
             apntmnt_dict = {}
             appointment_id = appointment.id
             apntmnt_dict["appointment_id"] = appointment_id
@@ -138,11 +145,20 @@ def appointments(request):
             apntmnt_dict["problem_description"] = problem_description
             symptoms = appointment.symptoms
             apntmnt_dict["symptoms"] = symptoms
-            if appointment.approval_status == True and appointment.rejection_status == False and appointment.cure_status == False:
+
+            appointment_info_query_set = appointment.appointmentinfo_set.reverse()
+            if not appointment_info_query_set:
+                continue
+            appointment_info_obj = appointment_info_query_set[0]
+            if appointment_info_obj.receptionist_approval_status == True and appointment_info_obj.rejection_status == False and appointment_info_obj.doctor_approval_status == False and appointment_info_obj.payment_status == True:
                 res["data"]["requested_appointments"].append(apntmnt_dict)
-            if appointment.cure_status == True and appointment.prescription_status == False:
+            if appointment_info_obj.doctor_approval_status == True and appointment_info_obj.prescription_status == False and appointment_info_obj.payment_status == True and appointment_info_obj.rejection_status == False:
+                slot_start = appointment.slot_start.strftime("%H:%M:%S")
+                apntmnt_dict["slot_start"] = slot_start
+                slot_end = appointment.slot_end.strftime("%H:%M:%S")
+                apntmnt_dict["slot_end"] = slot_end
                 res["data"]["scheduled_appointments"].append(apntmnt_dict)
-            if appointment.payment == True:
+            if appointment_info_obj.payment_status == True and appointment_info_obj.rejection_status == False and appointment_info_obj.prescription_status == True:
                 res["data"]["previous_appointments"].append(apntmnt_dict)
         return JsonResponse(res, status = 200)
     elif request.method == "PATCH":
@@ -151,13 +167,23 @@ def appointments(request):
         if not appointment_id:
             res = {"message" : "Appointment id is required"}
             return JsonResponse(res, status = 400)
-        appointment_query_set = Appointment.objects.filter(id = appointment_id, approval_status = True, prescription_status = False)
+        appointment_query_set = Appointment.objects.filter(id = appointment_id)
         if not appointment_query_set:
             res = {"message" : f"There is no such appointment with id : {appointment_id}"}
             return JsonResponse(res, status = 400)
-        appointment_query_set.update(cure_status = True, last_modified_by_doctor = datetime.datetime.now())
-        res = {"message" : f"Appointment with id = {appointment_id} is scheduled on {appointment_query_set[0].requested_for}"}
-        return JsonResponse(res, status = 200)
+        appointment_obj = appointment_query_set[0]
+        appointment_info_query_set = appointment_obj.appointmentinfo_set.reverse()
+        if appointment_info_query_set:
+            appointment_info_obj = appointment_info_query_set[0]
+            if appointment_info_obj.receptionist_approval_status == True and appointment_info_obj.prescription_status == False:
+                appointment_info_obj.doctor_approval_status = True
+                appointment_info_obj.last_modified_by_doctor = datetime.datetime.now()
+                appointment_info_obj.save()
+                res = {"message" : f"Appointment with id = {appointment_id} is scheduled on {appointment_obj.requested_for} for the slot : from {appointment_obj.slot_start.strftime("%H:%M:%S")} to {appointment_obj.slot_end.strftime("%H:%M:%S")}"}
+                return JsonResponse(res, status = 200)
+            else:
+                res = {"message" : "This appointment has not been approved by the receptionist"}
+                return JsonResponse(res, status = 400)
     elif request.method == "DELETE":
         data = json.loads(request.body)
         appointment_id = data.get("appointment_id")
@@ -168,49 +194,114 @@ def appointments(request):
         if not appointment_id:
             res = {"message" : "Appointment_id is required"}
             return JsonResponse(res, status = 400)
-        appointment_query_set = Appointment.objects.filter(id = appointment_id, approval_status = True, cure_status = False, prescription_status = False)
+        appointment_query_set = Appointment.objects.filter(id = appointment_id)
         if not appointment_query_set:
             res = {"message" : f"There does not exist any appointment with appointment_id : {appointment_id}"}
             return JsonResponse(res, status = 404)
         appointment_obj = appointment_query_set[0]
-        if appointment_obj.cure_status:
-            res = {"message" : "The appointment is already scheduled"}
-            return JsonResponse(res, 400)
+        appointment_info_query_set = appointment_obj.appointmentinfo_set.values() #filter(receptionist_approval_status = True, doctor_approval_status = False, prescription_status = False)
+        if not appointment_info_query_set:
+            res = {"message" : "The appointment has not been seen by the receptionist"}
+            return JsonResponse(res, status = 400)
         else:
-            appointment_query_set.update(remark = remark, last_modified_by_doctor = datetime.datetime.now(), rejection_status = True)
-            res = {"message" : f"Appointment with appointment id = {appointment_id} has been rejected"}
-            return JsonResponse(res, status = 200)
+            appointment_info_obj = appointment_info_query_set[0]
+            if appointment_info_obj.receptionist_approval_status == True:
+                if appointment_info_obj.doctor_approval_status == False:
+                    appointment_info_obj.rejection_status = True
+                    appointment_info_obj.remark = remark
+                    res = {"message" : "The appointment is successfully rejected"}
+                    return JsonResponse(res, status = 200)
+                else:
+                    res = {"message" : f"The appointment is scheduled on {appointment_obj.requested_for} from {appointment_obj.slot_start} to {appointment_obj.slot_end}"}
+                    return JsonResponse(res, status = 409)
+            else:
+                res = {"message" : "The appointment is not approved by receptionist"}
+                return JsonResponse(res, status = 400)
     else:
         res = {"message" : "Invalid request method"}
         return JsonResponse(res, status = 405)
     
-def prescription(request):
+def give_prescription(request):
     if not request.user.is_authenticated:
         res = {"message" : "Login is required !!!"}
         return JsonResponse(res, status = 401)
-    if not request.user.is_doctor:
+    if not request.user.role.role == "Doctor":
         res = {"message" : "Feature only available to doctors only"}
         return JsonResponse(res, status = 403)
     if request.method == "POST":
         data = request.POST
         appointment_id = data.get("appointment_id")
-        # appointment_obj = Appointment.objects.filter(id = appointment_id)[0]
+        appointment_obj = Appointment.objects.filter(id = appointment_id)[0]
         medicine_list = data.getlist("medicine")
-        frequency_list = data.getlist("freq")
-        number_of_days_list = data.getlist("qty")
-        print(medicine_list)
-        print(frequency_list)
-        print(number_of_days_list)
-        # for i in range(len(medicine_list)):
-        #     medicine = medicine_list[i]
-        #     frequency = frequency_list[i]
-        #     number_of_days = number_of_days_list[i]
-        #     prescription_obj = Prescription.objects.create(medicine = medicine, frequency = frequency, number_of_days = number_of_days)
-        #     prescription_obj.appointment.add(appointment_obj)
-        # res = {"message" : "Prescription is generated successfully"}
-        # return JsonResponse(res, status = 201)
+        frequency_list = data.getlist("frequency")
+        number_of_days_list = data.getlist("number_of_days")
+        if not (medicine_list and frequency_list and number_of_days_list):
+            res = {"message" : "Information given is not sufficient"}
+            return JsonResponse(res, status = 400)
+        appointment_query_set = Appointment.objects.filter(id = appointment_id)
+        if not appointment_query_set:
+            res = {"message" : f"There is no appointment with appointment_id : {appointment_id}"}
+            return JsonResponse(res, status = 400)
+        appointment_obj = appointment_query_set[0]
+        appointment_info_query_set = appointment_obj.appointmentinfo_set.reverse()
+        print(appointment_info_query_set)
+        if not appointment_info_query_set:
+            res = {"message" : "The appointment has not been seen by the receptionist"}
+            return JsonResponse(res, status = 400)
+        appointment_info_obj = appointment_info_query_set[0]
+        if not appointment_info_obj.rejection_status == False:
+            res = {"message" : "The appointment is already rejected by the receptionist"}
+            return JsonResponse(res, status = 409)
+        if appointment_info_obj.doctor_approval_status == True:
+            if appointment_info_obj.prescription_status == True:
+                res = {"message" : "The prescription for this appointment is already generated"}
+                return JsonResponse(res, status = 409)
+            else:
+                appointment_info_obj.prescription_status = True
+                for i in range(len(medicine_list)):
+                    medicine = medicine_list[i]
+                    if not medicine:
+                        res = {"message" : "Invalid medicine name"}
+                        return JsonResponse(res, status = 400)
+                    frequency = frequency_list[i]
+                    if not frequency:
+                        res = {"message" : "Frequency can not be empty"}
+                        return JsonResponse(res, status = 400)
+                    else:
+                        if int(frequency) > 4:
+                            res = {"message" : "Frequency cannot be greater than 4"}
+                            return JsonResponse(res, status = 400)
+                    number_of_days = number_of_days_list[i]
+                    if int(number_of_days) > 365:
+                        res = {"message" : "Medicine can be given for one year at max"}
+                        return JsonResponse(res, status = 400)
+                    prescription_obj = Prescription.objects.create(medicine = medicine, frequency = frequency, number_of_days = number_of_days)
+                    prescription_obj.appointment.add(appointment_obj)
+                appointment_info_obj.save()
+                res = {"message" : "Prescription is generated succesfully"}
+                return JsonResponse(res, status = 201)
+        else:
+            res = {"message" : "The appointment is not been approved by you"}
+            return JsonResponse(res, status = 400)
 
-
-        
-
-        
+def profile(request):
+    if not request.user.is_authenticated:
+        res = {"message" : "Login is required !!!"}
+        return JsonResponse(res, status = 401)
+    if not request.user.role.role == "Doctor":
+        res = {"message" : "Only doctor can see his/her profile"}
+        return JsonResponse(res, status = 403)
+    if request.method == "GET":
+        profile_query_set = CustomUser.objects.filter(id = request.user.id).values("id", "first_name", "last_name", "email", "phone_number")
+        res = {"message" : "success", "data" : [], "more_info" : []}
+        res["data"].append((profile_query_set)[0])
+        info_set = request.user.doctorinfo_set.values("gender", "address", "profile_photo")
+        speciality = request.user.doctorinfo_set.reverse()[0].speciality.speciality
+        more_info = info_set[0]
+        more_info["speciality"] = speciality
+        print(more_info)
+        res["more_info"].append(more_info)
+        return JsonResponse(res, status = 200)
+    else:
+        res = {"message" : "Invalid requet method"}
+        return JsonResponse(res, status = 405)

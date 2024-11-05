@@ -4,9 +4,6 @@ from django.db import models
 from users.models import CustomUser
 
 class PatientInfo(models.Model):
-
-    def nameFile(self, filename):
-        return '/'.join(["patient", f"id_{self.patient.id}", filename])
     
     patient = models.ForeignKey(CustomUser, on_delete = models.SET_NULL, null = True)
     height = models.PositiveSmallIntegerField()
@@ -16,7 +13,6 @@ class PatientInfo(models.Model):
     gender = models.CharField(max_length = 6)
     address = models.TextField()
     medical_history = models.TextField(null = True)
-    profile_photo = models.ImageField(upload_to = nameFile, default = '/'.join(["patient", "default_profile", "profile.jpeg"]))
 
     class Meta:
         db_table = "patient_info"
@@ -27,15 +23,26 @@ class Appointment(models.Model):
     symptoms = models.TextField()
     problem_description = models.TextField()
     requested_at = models.DateTimeField(auto_now_add = True)
-    requested_for = models.DateTimeField(null = True)
-    approval_status = models.BooleanField(default = False)
-    cure_status = models.BooleanField(default = False)
+    requested_for = models.DateField()
+    slot_start = models.TimeField()
+    slot_end = models.TimeField()
+
+    class Meta:
+        db_table = "appointments"
+
+class AppointmentInfo(models.Model):
+    appointment = models.ForeignKey(Appointment, on_delete = models.SET_NULL, null = True)
+    receptionist_approval_status = models.BooleanField(default = False)
+    doctor_approval_status = models.BooleanField(default = False)
     remark = models.TextField(null = True)
     last_modified_by_receptionist = models.DateTimeField(null = True)
     last_modified_by_doctor = models.DateTimeField(null = True)
     rejection_status = models.BooleanField(default = False)
-    payment = models.BooleanField(default = False)
+    payment_status = models.BooleanField(default = False)
     prescription_status = models.BooleanField(default = False)
+
+    class Meta:
+        db_table = "appointments_info"
 
 class Prescription(models.Model):
     appointment = models.ManyToManyField(Appointment)
